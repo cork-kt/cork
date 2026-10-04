@@ -1,0 +1,11 @@
+<resources>
+    <color name="cork_background">#0B0D10</color>
+    <color name="cork_surface">#14181D</color>
+    <color name="cork_surface_alt">#1B2027</color>
+    <color name="cork_primary">#9BCBFF</color>
+    <color name="cork_primary_text">#07111C</color>
+    <color name="cork_text">#F2F5F8</color>
+    <color name="cork_muted">#AEB7C2</color>
+    <color name="cork_success">#9DE2BA</color>
+    <color name="cork_error">#FFB4AB</color>
+</resources>
