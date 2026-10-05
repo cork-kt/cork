@@ -1,6 +1,6 @@
 [package]
 name = "cork"
-version = "0.1.0"
+version = "1.0.0-alpha1"
 edition = "2024"
 license = "Apache-2.0"
 description = "Fast compression and archive backend for Android"
@@ -15,3 +15,7 @@ lzma-rust2 = { version = "0.21.0", features = ["encoder", "optimization"] }
 sevenz-rust2 = { version = "0.23.0", default-features = true }
 zip = { version = "8.6.0", default-features = true }
 libc = "0.2"
+
+[profile.release]
+lto = true
+codegen-units = 1

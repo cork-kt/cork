@@ -8,18 +8,37 @@ Cork is a High-performance Android-first compression and archive library with a 
 import cork.Cork
 import cork.CompressionLevel
 import cork.ContainerFormat
+import cork.CorkThreads
 
 // ZIP
 Cork.compress(
     input = "example/path/to/myFiles",
     output = "example/path/to/myArchive.zip",
     format = ContainerFormat.Zip,
-    level = CompressionLevel.Default
+    level = CompressionLevel.Default,
+    threads = CorkThreads.Auto
+)
+
+// for outputting to a Uri SAF file
+Cork.compress(
+    input = "example/path/to/myFiles",
+    output = exampleUri,
+    format = ContainerFormat.Zip,
+    level = CompressionLevel.Default,
+    threads = CorkThreads.Auto
 )
 
 Cork.decompress(
     input = "example/path/to/myArchive.zip", 
-    output = "example/path/to/myFiles"
+    output = "example/path/to/myFiles",
+    threads = CorkThreads.Auto
+)
+
+// for inputting from a Uri SAF file
+Cork.decompress(
+    input = exampleUri,
+    output = "example/path/to/myFiles",
+    threads = CorkThreads.Auto
 )
 
 // 7z
@@ -27,7 +46,8 @@ Cork.compress(
     input = "example/path/to/myFiles",
     output = "example/path/to/myArchive.7z",
     format = ContainerFormat.SevenZ,
-    level = CompressionLevel.Best
+    level = CompressionLevel.Best,
+    threads = CorkThreads.Auto
 )
 
 // Standalone .lzma
@@ -35,7 +55,8 @@ Cork.compress(
     input = "example/path/to/myFile.txt",
     output = "example/path/to/myArchive.lzma",
     format = ContainerFormat.Lzma,
-    level = CompressionLevel.Balanced
+    level = CompressionLevel.Balanced,
+    threads = CorkThreads.Auto
 )
 ```
 

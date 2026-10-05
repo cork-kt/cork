@@ -1,5 +1,6 @@
 plugins {
     alias(libs.plugins.android.library)
+    alias(libs.plugins.maven.publish)
 }
 
 android {
@@ -33,7 +34,36 @@ android {
     }
 
     publishing {
-        singleVariant("release")
+        singleVariant("release") {
+            withSourcesJar()
+            withJavadocJar()
+        }
+    }
+}
+
+publishing {
+    publications {
+        register<MavenPublication>("release") {
+            afterEvaluate {
+                from(components["release"])
+            }
+
+            groupId = "io.github.cork-kt"
+            artifactId = "cork"
+            version = "1.0.0-alpha1"
+        }
+    }
+
+    repositories {
+        maven {
+            name = "MavenCentral"
+            url = uri("https://sonatype.org")
+
+            credentials {
+                username = System.getenv("MAVEN_USERNAME")
+                password = System.getenv("MAVEN_PASSWORD")
+            }
+        }
     }
 }
 
@@ -44,6 +74,7 @@ kotlin {
 tasks.named("preBuild") {
     dependsOn(rootProject.tasks.named("buildRustRelease"))
 }
+
 dependencies {
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.startup.runtime)

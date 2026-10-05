@@ -7,12 +7,12 @@ import java.io.File
 import java.nio.file.Path
 
 public object Cork {
-    public const val VERSION: String = "0.1.0"
+    public const val VERSION: String = "1.0.0-alpha1"
 
     /**
-     * compresses input file/directory into a selected ContainerFormat archive to output file.
+     * compresses [input] file/directory into a selected [ContainerFormat] to output file.
      *
-     * @return CorkResult.
+     * @return [CorkResult].
      */
     public suspend fun compress(
         input: String,
@@ -81,7 +81,7 @@ public object Cork {
     /**
      * Extracts an archive. The container format is detected from its magic bytes.
      *
-     * @return CorkResult.
+     * @return [CorkResult].
      */
     public suspend fun decompress(
         archive: String,

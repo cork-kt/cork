@@ -23,4 +23,5 @@ ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
 [plugins]
 android-library = { id = "com.android.library", version.ref = "agp" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+maven-publish = { id = "maven-publish" }
 
