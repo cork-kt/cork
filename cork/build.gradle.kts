@@ -1,6 +1,8 @@
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.maven.publish)
+    alias(libs.plugins.gradleup.nmcp)
+    alias(libs.plugins.signing)
 }
 
 android {
@@ -53,18 +55,21 @@ publishing {
             version = "1.0.0-alpha1"
         }
     }
+}
 
-    repositories {
-        maven {
-            name = "MavenCentral"
-            url = uri("https://sonatype.org")
-
-            credentials {
-                username = System.getenv("MAVEN_USERNAME")
-                password = System.getenv("MAVEN_PASSWORD")
-            }
-        }
+nmcp {
+    publishAllPublicationsToCentralPortal {
+        username = System.getenv("MAVEN_USERNAME")
+        password = System.getenv("MAVEN_PASSWORD")
+        publishingType = "AUTOMATIC"
     }
+}
+
+signing {
+    val signingKey = System.getenv("SIGNING_SECRET_KEY")
+    val signingPassword = System.getenv("SIGNING_PASSWORD")
+    useInMemoryPgpKeys(signingKey, signingPassword)
+    sign(publishing.publications["release"])
 }
 
 kotlin {

@@ -6,6 +6,7 @@ composeBom = "2026.09.00"
 kotlinxCoroutinesCore = "1.11.0"
 core = "1.19.1"
 startupRuntime = "1.2.0"
+nmcp = "1.6.2"
 
 [libraries]
 activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
@@ -24,4 +25,6 @@ ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
 android-library = { id = "com.android.library", version.ref = "agp" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 maven-publish = { id = "maven-publish" }
+gradleup-nmcp = { id = "com.gradleup.nmcp", version.ref = "nmcp" }
+signing = { id = "signing" }
 

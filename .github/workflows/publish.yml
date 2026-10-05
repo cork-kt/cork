@@ -35,4 +35,4 @@ jobs:
           SIGNING_KEY_ID: ${{ secrets.SIGNING_KEY_ID }}
           SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
           SIGNING_SECRET_KEY: ${{ secrets.GPG_KEY_CONTENTS }}
-        run: cargo install cargo-ndk && chmod +x gradlew && ./gradlew publishAllPublicationsToMavenCentralRepository
+        run: cargo install cargo-ndk && chmod +x gradlew && ./gradlew publishAllPublicationsToCentralPortal
