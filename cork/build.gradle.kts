@@ -53,6 +53,33 @@ publishing {
             groupId = "io.github.cork-kt"
             artifactId = "cork"
             version = "1.0.0-alpha1"
+
+            pom {
+                name = "Cork"
+                description = "Cork is a High-performance Android-first compression and archive library with a Kotlin API backed by optimized native Rust codes."
+                url = "https://github.com/cork-kt/cork"
+
+                licenses {
+                    license {
+                        name = "The Apache License, Version 2.0"
+                        url = "http://www.apache.org/licenses/"
+                    }
+                }
+
+                developers {
+                    developer {
+                        id = "Ishan09811"
+                        name = "Ishan"
+                        email = "ishanbasaki7@gmail.com"
+                    }
+                }
+
+                scm {
+                    connection = "scm:git:https://github.com/cork-kt/cork.git"
+                    developerConnection = "scm:git:ssh://git@github.com/cork-kt/cork.git"
+                    url = "https://github.com/cork-kt/cork"
+                }
+            }
         }
     }
 }
