@@ -1,6 +1,25 @@
+/*
+ * Copyright 2026 Ishan09811
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 package cork
 
 import android.net.Uri
+import android.os.Build
+import androidx.annotation.RequiresApi
+import cork.utils.Saf
+import cork.utils.SafUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -36,6 +55,11 @@ public object Cork {
         return@withContext CorkResult(result == null, result)
     }
 
+    /**
+     * compresses [input] file/directory into a selected [ContainerFormat] to [output] SAF uri file.
+     *
+     * @return [CorkResult].
+     */
     public suspend fun compress(
         input: String,
         output: Uri,
@@ -62,6 +86,67 @@ public object Cork {
         return@withContext CorkResult(result == null, result)
     }
 
+    /**
+     * compresses [input] SAF uri file into a selected [ContainerFormat] to [output] SAF uri file.
+     *
+     * @return [CorkResult].
+     */
+    @RequiresApi(Build.VERSION_CODES.N)
+    public suspend fun compress(
+        input: Uri,
+        output: Uri,
+        format: ContainerFormat,
+        level: CompressionLevel = CompressionLevel.Default,
+        threads: CorkThreads = CorkThreads.Auto
+    ): CorkResult = withContext(Dispatchers.IO) {
+        require(format != ContainerFormat.Auto) {
+            "Auto is only valid for decompression."
+        }
+
+        val result = SafUtils.compressFileToUri(
+            input,
+            output,
+            format,
+            level,
+            threads
+        )
+
+        return@withContext CorkResult(result == null, result)
+    }
+
+    /**
+     * compresses [input] SAF uri directory into a selected [ContainerFormat] to [output] SAF uri file.
+     *
+     * @return [CorkResult].
+     */
+    @RequiresApi(Build.VERSION_CODES.N)
+    public suspend fun compress(
+        input: Saf.Tree,
+        output: Uri,
+        format: ContainerFormat,
+        level: CompressionLevel = CompressionLevel.Default,
+        threads: CorkThreads = CorkThreads.Auto
+    ): CorkResult = withContext(Dispatchers.IO) {
+        require(format != ContainerFormat.Auto) {
+            "Auto is only valid for decompression."
+        }
+
+        val result = SafUtils.compressTreeToUri(
+            input.uri,
+            output,
+            format,
+            level,
+            threads
+        )
+
+        return@withContext CorkResult(result == null, result)
+    }
+
+    /**
+     * compresses [input] file/directory into a selected [ContainerFormat] to output file.
+     *
+     * @return [CorkResult].
+     */
     public suspend fun compress(
         input: File,
         output: File,
@@ -70,6 +155,11 @@ public object Cork {
         threads: CorkThreads = CorkThreads.Auto
     ): CorkResult = compress(input.path, output.path, format, level, threads)
 
+    /**
+     * compresses [input] file/directory into a selected [ContainerFormat] to output file.
+     *
+     * @return [CorkResult].
+     */
     public suspend fun compress(
         input: Path,
         output: Path,
@@ -79,7 +169,7 @@ public object Cork {
     ): CorkResult = compress(input.toString(), output.toString(), format, level, threads)
 
     /**
-     * Extracts an archive. The container format is detected from its magic bytes.
+     * Extracts [archive] to [outputDirectory]. The container format is detected from its magic bytes.
      *
      * @return [CorkResult].
      */
@@ -97,6 +187,11 @@ public object Cork {
         return@withContext CorkResult(result == null, result)
     }
 
+    /**
+     * Extracts SAF uri [archive] to [outputDirectory]. The container format is detected from its magic bytes.
+     *
+     * @return [CorkResult].
+     */
     public suspend fun decompress(
         archive: Uri,
         outputDirectory: String,
@@ -115,12 +210,42 @@ public object Cork {
         return@withContext CorkResult(result == null, result)
     }
 
+    /**
+     * Extracts SAF uri [archive] to SAF uri [outputDirectory]. The container format is detected from its magic bytes.
+     *
+     * @return [CorkResult].
+     */
+    @RequiresApi(Build.VERSION_CODES.N)
+    public suspend fun decompress(
+        archive: Uri,
+        outputDirectory: Uri,
+        threads: CorkThreads = CorkThreads.Auto
+    ): CorkResult = withContext(Dispatchers.IO) {
+        val result = SafUtils.decompressUriToTree(
+            archiveUri = archive,
+            outputTreeUri = outputDirectory,
+            threads = threads
+        )
+
+        return@withContext CorkResult(result == null, result)
+    }
+
+    /**
+     * Extracts [archive] to [outputDirectory]. The container format is detected from its magic bytes.
+     *
+     * @return [CorkResult].
+     */
     public suspend fun decompress(
         archive: File,
         outputDirectory: File,
         threads: CorkThreads = CorkThreads.Auto
     ): CorkResult = decompress(archive.path, outputDirectory.path, threads)
 
+    /**
+     * Extracts [archive] to [outputDirectory]. The container format is detected from its magic bytes.
+     *
+     * @return [CorkResult].
+     */
     public suspend fun decompress(
         archive: Path,
         outputDirectory: Path,

@@ -9,6 +9,7 @@ import cork.Cork
 import cork.CompressionLevel
 import cork.ContainerFormat
 import cork.CorkThreads
+import cork.utils.Saf
 
 // ZIP
 Cork.compress(
@@ -28,6 +29,24 @@ Cork.compress(
     threads = CorkThreads.Auto
 )
 
+// for inputting from a Uri SAF file and outputting to a Uri SAF file
+Cork.compress(
+    input = exampleInputUri,
+    output = exampleOutputUri,
+    format = ContainerFormat.Zip,
+    level = CompressionLevel.Default,
+    threads = CorkThreads.Auto
+)
+
+// for inputting from a Uri SAF directory and outputting to a Uri SAF file
+Cork.compress(
+    input = Saf.Tree(exampleInputUri),
+    output = exampleOutputUri,
+    format = ContainerFormat.Zip,
+    level = CompressionLevel.Default,
+    threads = CorkThreads.Auto
+)
+
 Cork.decompress(
     input = "example/path/to/myArchive.zip", 
     output = "example/path/to/myFiles",
@@ -38,6 +57,13 @@ Cork.decompress(
 Cork.decompress(
     input = exampleUri,
     output = "example/path/to/myFiles",
+    threads = CorkThreads.Auto
+)
+
+// for inputting from a Uri SAF file and outputting to a Uri SAF directory
+Cork.decompress(
+    input = exampleInputUri,
+    output = exampleOutputUri,
     threads = CorkThreads.Auto
 )
 
@@ -58,6 +84,10 @@ Cork.compress(
     level = CompressionLevel.Balanced,
     threads = CorkThreads.Auto
 )
+```
+
+```
+implementation("io.github.cork-kt:cork:1.0.0-alpha1")
 ```
 
 All calls must be made from a coroutine.

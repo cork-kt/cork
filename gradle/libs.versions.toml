@@ -7,6 +7,7 @@ kotlinxCoroutinesCore = "1.11.0"
 core = "1.19.1"
 startupRuntime = "1.2.0"
 nmcp = "1.6.2"
+annotation = "1.11.0"
 
 [libraries]
 activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
@@ -20,6 +21,7 @@ ui = { module = "androidx.compose.ui:ui" }
 ui-graphics = { module = "androidx.compose.ui:ui-graphics" }
 ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
 ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
+annotation = { group = "androidx.annotation", name = "annotation", version.ref = "annotation" }
 
 [plugins]
 android-library = { id = "com.android.library", version.ref = "agp" }

@@ -1,3 +1,18 @@
+/*
+ * Copyright 2026 Ishan09811
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 use crate::error::CorkError;
 use lzma_rust2::{LzmaOptions, LzmaReader, LzmaWriter};
 use std::fs::{self, File};
@@ -25,6 +40,19 @@ fn owned_file_from_fd(fd: RawFd) -> Result<File, CorkError> {
     Ok(unsafe { File::from_raw_fd(fd) })
 }
 
+fn rewind_required(file: &mut File) -> Result<(), CorkError> {
+    use std::io::Seek;
+    file.seek(io::SeekFrom::Start(0))?;
+    Ok(())
+}
+
+fn reset_output(file: &mut File) -> Result<(), CorkError> {
+    use std::io::Seek;
+    file.set_len(0)?;
+    file.seek(io::SeekFrom::Start(0))?;
+    Ok(())
+}
+
 fn ensure_input_output_differ(input: &Path, output: &File) -> Result<(), CorkError> {
     let input_file = File::open(input)?;
     let input_metadata = input_file.metadata()?;
@@ -39,6 +67,12 @@ fn ensure_input_output_differ(input: &Path, output: &File) -> Result<(), CorkErr
     }
 
     Ok(())
+}
+
+pub struct SafInputEntry {
+    pub path: String,
+    pub is_directory: bool,
+    pub fd: RawFd,
 }
 
 pub fn compress(
@@ -123,6 +157,166 @@ pub fn compress_to_fd(
     }
 }
 
+pub fn compress_fd_to_fd(
+    input_fd: RawFd,
+    output_fd: RawFd,
+    format: i32,
+    level: i32,
+    requested_threads: i32,
+    entry_name: &str,
+) -> Result<u64, CorkError> {
+    if input_fd < 0 || output_fd < 0 {
+        if input_fd >= 0 {
+            unsafe { libc::close(input_fd) };
+        }
+        if output_fd >= 0 && output_fd != input_fd {
+            unsafe { libc::close(output_fd) };
+        }
+        return Err(CorkError::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid SAF file descriptor",
+        )));
+    }
+
+    if input_fd == output_fd {
+        unsafe { libc::close(input_fd) };
+        return Err(CorkError::InvalidFormat(
+            "SAF input and output descriptors must differ".to_owned(),
+        ));
+    }
+
+    let input = owned_file_from_fd(input_fd)?;
+    let mut output = owned_file_from_fd(output_fd)?;
+
+    match format {
+        FORMAT_ZIP => {
+            reset_output(&mut output)?;
+            compress_zip_from_reader(input, output, level, Some(entry_name))
+        }
+        FORMAT_7Z => {
+            reset_output(&mut output)?;
+            compress_7z_from_reader(
+                input,
+                output,
+                level,
+                resolve_threads(requested_threads),
+                Some(entry_name),
+            )
+        }
+        FORMAT_LZMA => compress_lzma_reader_to_writer(input, output, None, level),
+        FORMAT_LZMA2 => Err(CorkError::Unsupported(
+            "standalone LZMA2 is reserved for the streaming codec API".to_owned(),
+        )),
+        FORMAT_AUTO => Err(CorkError::InvalidFormat(
+            "Auto cannot be used when compressing".to_owned(),
+        )),
+        other => Err(CorkError::InvalidFormat(format!(
+            "unknown container format id: {other}"
+        ))),
+    }
+}
+
+pub fn compress_tree_to_fd<F>(
+    output_fd: RawFd,
+    format: i32,
+    level: i32,
+    requested_threads: i32,
+    mut next_entry: F,
+) -> Result<u64, CorkError>
+where
+    F: FnMut() -> Result<Option<SafInputEntry>, CorkError>,
+{
+    let mut output = owned_file_from_fd(output_fd)?;
+    reset_output(&mut output)?;
+
+    match format {
+        FORMAT_ZIP => {
+            let mut archive = ZipWriter::new(BufWriter::new(output));
+            let options = zip_options(level);
+
+            loop {
+                let Some(entry) = next_entry()? else { break };
+                let source = if entry.is_directory {
+                    None
+                } else {
+                    Some(owned_file_from_fd(entry.fd)?)
+                };
+                let safe_name = match validate_entry_name(&entry.path) {
+                    Ok(name) => name,
+                    Err(error) => {
+                        drop(source);
+                        return Err(error);
+                    }
+                };
+
+                if entry.is_directory {
+                    archive.add_directory(format!("{safe_name}/"), options)?;
+                } else {
+                    let mut source = BufReader::new(source.expect("file entry must have a source"));
+                    archive.start_file(safe_name, options)?;
+                    io::copy(&mut source, &mut archive)?;
+                }
+            }
+
+            let target = archive.finish()?;
+            let mut target = target.into_inner().map_err(|err| CorkError::Io(err.into_error()))?;
+            target.flush()?;
+            Ok(target.metadata()?.len())
+        }
+        FORMAT_7Z => {
+            use sevenz_rust2::{encoder_options::Lzma2Options, ArchiveEntry, ArchiveWriter};
+
+            let mut writer = ArchiveWriter::new(output)?;
+            let options = Lzma2Options::from_level_mt(
+                level.clamp(0, 9) as u32,
+                resolve_threads(requested_threads),
+                8 * 1024 * 1024,
+            );
+            writer.set_content_methods(vec![options.into()]);
+
+            loop {
+                let Some(entry) = next_entry()? else { break };
+                let source = if entry.is_directory {
+                    None
+                } else {
+                    Some(owned_file_from_fd(entry.fd)?)
+                };
+                let safe_name = match validate_entry_name(&entry.path) {
+                    Ok(name) => name,
+                    Err(error) => {
+                        drop(source);
+                        return Err(error);
+                    }
+                };
+
+                if entry.is_directory {
+                    writer.push_archive_entry(
+                        ArchiveEntry::new_directory(&safe_name),
+                        None::<File>,
+                    )?;
+                } else {
+                    writer.push_archive_entry(
+                        ArchiveEntry::new_file(&safe_name),
+                        Some(source.expect("file entry must have a source")),
+                    )?;
+                }
+            }
+
+            let mut target = writer.finish()?;
+            Ok(target.stream_position()?)
+        }
+        FORMAT_LZMA | FORMAT_LZMA2 => Err(CorkError::Unsupported(
+            "SAF tree input is only valid for ZIP and 7z; standalone LZMA is a single-file stream".to_owned(),
+        )),
+        FORMAT_AUTO => Err(CorkError::InvalidFormat(
+            "Auto cannot be used when compressing".to_owned(),
+        )),
+        other => Err(CorkError::InvalidFormat(format!(
+            "unknown container format id: {other}"
+        ))),
+    }
+}
+
 pub fn decompress(
     input: &Path, 
     output_dir: &Path,
@@ -169,6 +363,28 @@ pub fn decompress_from_fd(
         FORMAT_LZMA => decompress_lzma_from_reader(archive, output_dir, None),
         other => Err(CorkError::Unsupported(format!(
             "decompression does not recognize format id {other}"
+        ))),
+    }
+}
+
+pub fn decompress_to_tree<F>(
+    archive_fd: RawFd,
+    requested_threads: i32,
+    mut on_entry: F,
+) -> Result<u64, CorkError>
+where
+    F: FnMut(&str, bool) -> Result<RawFd, CorkError>,
+{
+    let mut archive = owned_file_from_fd(archive_fd)?;
+    rewind_required(&mut archive)?;
+    let format = detect_format_reader(&mut archive, None)?;
+    rewind_required(&mut archive)?;
+    match format {
+        FORMAT_ZIP => decompress_zip_to_tree(archive, &mut on_entry),
+        FORMAT_7Z => decompress_7z_to_tree(archive, resolve_threads(requested_threads), &mut on_entry),
+        FORMAT_LZMA => decompress_lzma_to_tree(archive, &mut on_entry),
+        other => Err(CorkError::Unsupported(format!(
+            "decompression: unable to recognize format id {other}"
         ))),
     }
 }
@@ -233,6 +449,27 @@ fn compress_lzma_to_writer<W: Write>(input: &Path, target: W, level: i32) -> Res
     Ok(counting.get_ref().bytes_written())
 }
 
+fn compress_lzma_reader_to_writer<R: Read, W: Write>(
+    source: R,
+    target: W,
+    input_size: Option<u64>,
+    level: i32,
+) -> Result<u64, CorkError> {
+    let options = LzmaOptions::with_preset(level.clamp(0, 9) as u32);
+    let counting = CountingWriter::new(target);
+    let mut writer = LzmaWriter::new_use_header(
+        BufWriter::new(counting),
+        &options,
+        input_size,
+    )?;
+
+    let mut source = BufReader::new(source);
+    io::copy(&mut source, &mut writer)?;
+    let mut target = writer.finish()?;
+    target.flush()?;
+    Ok(target.get_ref().bytes_written())
+}
+
 fn decompress_lzma(input: &Path, output_dir: &Path) -> Result<u64, CorkError> {
     let name = input
         .file_stem()
@@ -256,6 +493,22 @@ fn decompress_lzma_from_reader<R: Read>(
     target.flush()?;
 
     Ok(output.metadata()?.len())
+}
+
+fn decompress_lzma_to_tree<F>(
+    source: File,
+    on_entry: &mut F,
+) -> Result<u64, CorkError>
+where
+    F: FnMut(&str, bool) -> Result<RawFd, CorkError>,
+{
+    let output_name = "output";
+    let fd = on_entry(output_name, false)?;
+    let mut target = owned_file_from_fd(fd)?;
+    let mut reader = LzmaReader::new_mem_limit(BufReader::new(source), 1024 * 1024, None)?;
+    let copied = io::copy(&mut reader, &mut target)?;
+    target.flush()?;
+    Ok(copied)
 }
 
 fn compress_7z(
@@ -290,6 +543,24 @@ fn compress_7z_to_writer<W: Write + io::Seek>(
     Ok(target.stream_position()?)
 }
 
+fn compress_7z_from_reader<R: Read, W: Write + io::Seek>(
+    source: R,
+    target: W,
+    level: i32,
+    threads: u32,
+    entry_name: Option<&str>,
+) -> Result<u64, CorkError> {
+    use sevenz_rust2::{encoder_options::Lzma2Options, ArchiveEntry, ArchiveWriter};
+
+    let mut writer = ArchiveWriter::new(target)?;
+    let options = Lzma2Options::from_level_mt(level.clamp(0, 9) as u32, threads, 8 * 1024 * 1024);
+    writer.set_content_methods(vec![options.into()]);
+    let entry_name = validate_entry_name(entry_name.unwrap_or("input"))?;
+    writer.push_archive_entry(ArchiveEntry::new_file(&entry_name), Some(source))?;
+    let mut target = writer.finish()?;
+    Ok(target.stream_position()?)
+}
+
 fn decompress_7z(
     input: &Path,
     output_dir: &Path,
@@ -309,27 +580,63 @@ fn decompress_7z_from_reader<R: Read + io::Seek>(
     let mut reader = ArchiveReader::new(source, Password::empty())?;
     reader.set_thread_count(threads);
     reader.for_each_entries(|entry, stream| {
-        let normalized = entry.name().replace('\\', "/");
-        let relative = Path::new(&normalized);
-        if relative.is_absolute()
-            || relative.components().any(|component| {
-                matches!(
-                    component,
-                    std::path::Component::ParentDir
-                        | std::path::Component::RootDir
-                        | std::path::Component::Prefix(_)
-                )
-            })
-            || normalized.split('/').next().is_some_and(|component| component.contains(':'))
-        {
-            return Err(sevenz_rust2::Error::Other("archive entry escapes extraction directory".into()));
-        }
-
-        let destination = output_dir.join(relative);
+        let normalized = validate_entry_name(entry.name()).map_err(|err| sevenz_rust2::Error::Other(err.to_string().into()))?;
+        let destination = output_dir.join(&normalized);
         default_entry_extract_fn(entry, stream, &destination)
     })?;
 
     directory_size(output_dir)
+}
+
+fn decompress_7z_to_tree<F>(
+    source: File,
+    threads: u32,
+    on_entry: &mut F,
+) -> Result<u64, CorkError>
+where
+    F: FnMut(&str, bool) -> Result<RawFd, CorkError>,
+{
+    use sevenz_rust2::{ArchiveReader, Password};
+
+    let mut reader = ArchiveReader::new(source, Password::empty())?;
+    reader.set_thread_count(threads);
+
+    let mut total = 0u64;
+    reader.for_each_entries(|entry, stream| {
+        let normalized = validate_entry_name(entry.name())
+            .map_err(|err| sevenz_rust2::Error::Other(err.to_string().into()))?;
+        let directory = entry.is_directory();
+        let fd = on_entry(&normalized, directory)
+            .map_err(|err| sevenz_rust2::Error::Other(err.to_string().into()))?;
+
+        if directory {
+            return Ok(true);
+        }
+
+        if fd < 0 {
+            return Err(sevenz_rust2::Error::Other(
+                "SAF sink did not return an output fd for 7z file entry".into(),
+            ));
+        }
+
+        let mut output = owned_file_from_fd(fd)
+            .map_err(|err| sevenz_rust2::Error::Other(err.to_string().into()))?;
+        total = total.saturating_add(
+            io::copy(stream, &mut output)
+                .map_err(|err| sevenz_rust2::Error::Other(err.to_string().into()))?,
+        );
+        output.flush()
+            .map_err(|err| sevenz_rust2::Error::Other(err.to_string().into()))?;
+        Ok(true)
+    })?;
+
+    Ok(total)
+}
+
+fn zip_options(level: i32) -> SimpleFileOptions {
+    SimpleFileOptions::default()
+        .compression_method(CompressionMethod::Deflated)
+        .compression_level(Some(level.clamp(0, 9) as i64))
 }
 
 fn compress_zip(input: &Path, output: &Path, level: i32) -> Result<u64, CorkError> {
@@ -364,6 +671,22 @@ fn compress_zip_to_writer<W: Write + io::Seek>(input: &Path, target: W, level: i
     let mut target = archive.finish()?;
     target.flush()?;
     Ok(target.stream_position().unwrap_or(0))
+}
+
+fn compress_zip_from_reader<R: Read, W: Write + io::Seek>(
+    mut input: R,
+    target: W,
+    level: i32,
+    entry_name: Option<&str>,
+) -> Result<u64, CorkError> {
+    let mut archive = ZipWriter::new(BufWriter::new(target));
+    let entry_name = validate_entry_name(entry_name.unwrap_or("input"))?;
+    archive.start_file(entry_name, zip_options(level))?;
+    io::copy(&mut input, &mut archive)?;
+    let target = archive.finish()?;
+    let mut target = target.into_inner().map_err(|err| CorkError::Io(err.into_error()))?;
+    target.flush()?;
+    Ok(target.stream_position()?)
 }
 
 fn add_directory_to_zip<W: Write + io::Seek>(
@@ -405,6 +728,43 @@ fn decompress_zip_from_reader<R: Read + io::Seek>(source: R, output_dir: &Path) 
     directory_size(output_dir)
 }
 
+fn decompress_zip_to_tree<F>(
+    source: File,
+    on_entry: &mut F,
+) -> Result<u64, CorkError>
+where
+    F: FnMut(&str, bool) -> Result<RawFd, CorkError>,
+{
+    let mut archive = ZipArchive::new(BufReader::new(source))?;
+    let mut total = 0u64;
+
+    for index in 0..archive.len() {
+        let mut file = archive.by_index(index)?;
+        let name = file
+            .enclosed_name()
+            .ok_or_else(|| CorkError::Archive(format!("unsafe ZIP entry path: {}", file.name())))?;
+        let name = name.to_string_lossy().into_owned();
+        let directory = file.is_dir();
+        let fd = on_entry(&name, directory)?;
+
+        if directory {
+            continue;
+        }
+
+        if fd < 0 {
+            return Err(CorkError::Archive(format!(
+                "SAF sink did not return an output fd for ZIP entry: {name}"
+            )));
+        }
+
+        let mut output = owned_file_from_fd(fd)?;
+        total = total.saturating_add(io::copy(&mut file, &mut output)?);
+        output.flush()?;
+    }
+
+    Ok(total)
+}
+
 fn normalize_zip_path(path: &Path) -> String {
     path.components()
         .filter_map(|component| match component {
@@ -413,6 +773,27 @@ fn normalize_zip_path(path: &Path) -> String {
         })
         .collect::<Vec<_>>()
         .join("/")
+}
+
+fn validate_entry_name(name: &str) -> Result<String, CorkError> {
+    let normalized = name.replace('\\', "/");
+    let without_trailing_slash = normalized.strip_suffix('/').unwrap_or(&normalized);
+    if without_trailing_slash.is_empty()
+        || without_trailing_slash.starts_with('/')
+        || without_trailing_slash.contains('\0')
+        || without_trailing_slash
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == "..")
+        || without_trailing_slash
+            .split('/')
+            .next()
+            .is_some_and(|part| part.contains(':'))
+    {
+        return Err(CorkError::Archive(format!(
+            "unsafe archive entry path: {name}"
+        )));
+    }
+    Ok(without_trailing_slash.to_owned())
 }
 
 fn directory_size(path: &Path) -> Result<u64, CorkError> {
