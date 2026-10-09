@@ -648,20 +648,16 @@ fn compress_zip(input: &Path, output: &Path, level: i32) -> Result<u64, CorkErro
 fn compress_zip_to_writer<W: Write + io::Seek>(input: &Path, target: W, level: i32) -> Result<u64, CorkError> {
     let mut archive = ZipWriter::new(BufWriter::new(target));
 
-    let options = SimpleFileOptions::default()
-        .compression_method(CompressionMethod::Deflated)
-        .compression_level(Some(level.clamp(0, 9) as i64));
-
     if input.is_file() {
         let name = input
             .file_name()
             .ok_or_else(|| CorkError::InvalidFormat("input file has no filename".to_owned()))?;
 
-        archive.start_file(name.to_string_lossy(), options)?;
+        archive.start_file(name.to_string_lossy(), zip_options(level))?;
         let mut source = BufReader::new(File::open(input)?);
         io::copy(&mut source, &mut archive)?;
     } else if input.is_dir() {
-        add_directory_to_zip(&mut archive, input, input, options)?;
+        add_directory_to_zip(&mut archive, input, input, zip_options(level))?;
     } else {
         return Err(CorkError::Unsupported(
             "input must be a regular file or directory".to_owned(),

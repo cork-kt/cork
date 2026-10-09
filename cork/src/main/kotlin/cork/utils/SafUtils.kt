@@ -30,52 +30,10 @@ import cork.CorkThreads
 import cork.libraryContext
 import java.io.IOException
 import java.util.ArrayDeque
-import java.util.HashMap
-import java.util.HashSet
 
 internal object SafUtils {
     private const val MIME_DIRECTORY = DocumentsContract.Document.MIME_TYPE_DIR
     private const val MIME_BINARY = "application/octet-stream"
-
-    @RequiresApi(Build.VERSION_CODES.N)
-    internal fun compressFile(
-        resolver: ContentResolver,
-        inputUri: Uri,
-        output: ParcelFileDescriptor,
-        format: ContainerFormat,
-        level: CompressionLevel,
-        threads: CorkThreads,
-    ): String? {
-        require(!DocumentsContract.isTreeUri(inputUri)) {
-            "A tree URI must use Cork.compressTree(...)."
-        }
-        require(format != ContainerFormat.Auto) {
-            "Auto is only valid for decompression."
-        }
-
-        val input = resolver.openFileDescriptor(inputUri, "r")
-            ?: throw IOException("Unable to open SAF input: $inputUri")
-
-        input.use { input ->
-            val inputName = queryDisplayName(resolver, inputUri) ?: "input"
-            val outputFd = output.detachFd()
-            val inputFd = try {
-                input.detachFd()
-            } catch (error: Throwable) {
-                ParcelFileDescriptor.adoptFd(outputFd).close()
-                throw error
-            }
-
-            return CorkNative.compressFdToFd(
-                inputFd = inputFd,
-                outputFd = outputFd,
-                format = format.id,
-                level = level.id,
-                threads = threads.nativeValue,
-                inputName = inputName,
-            )
-        }
-    }
 
     @RequiresApi(Build.VERSION_CODES.N)
     internal fun compressFileToUri(
@@ -88,15 +46,52 @@ internal object SafUtils {
         /*require(!DocumentsContract.isTreeUri(outputUri)) {
             "Archive output must be a document URI, not a tree URI."
         }*/
+        /*require(!DocumentsContract.isTreeUri(inputUri)) {
+            "A tree URI must use Cork.compress(input = Saf.Tree(Uri), ...)."
+        }*/
+        require(format != ContainerFormat.Auto) {
+            "Auto is only valid for decompression."
+        }
+
         val resolver = libraryContext.contentResolver
-        val outputMode = archiveOutputMode(format)
-        val output = resolver.openFileDescriptor(outputUri, outputMode)
-            ?: throw IOException("Unable to open SAF archive output: $outputUri")
-        return try {
-            compressFile(resolver, inputUri, output, format, level, threads)
-        } catch (error: Throwable) {
+
+        val input = resolver.openFileDescriptor(inputUri, "r")
+            ?: return "Unable to open SAF input: $inputUri"
+
+        val output = resolver.openFileDescriptor(outputUri, archiveOutputMode(format))
+            ?: return "Unable to open SAF archive output: $outputUri"
+
+        var outputFd: Int = -1
+        var inputFd: Int = -1
+
+        try {
+            val inputName = queryDisplayName(resolver, inputUri) ?: "input"
+
+            outputFd = output.detachFd()
             output.close()
-            throw error
+            inputFd = input.detachFd()
+            input.close()
+
+            return CorkNative.compressFdToFd(
+                inputFd = inputFd,
+                outputFd = outputFd,
+                format = format.id,
+                level = level.id,
+                threads = threads.nativeValue,
+                inputName = inputName,
+            )
+        } catch (error: Throwable) {
+            try { output.close() } catch (_: Throwable) {}
+            try { input.close() } catch (_: Throwable) {}
+
+            if (outputFd >= 0) {
+                try { ParcelFileDescriptor.adoptFd(outputFd).close() } catch (_: Throwable) {}
+            }
+            if (inputFd >= 0) {
+                try { ParcelFileDescriptor.adoptFd(inputFd).close() } catch (_: Throwable) {}
+            }
+
+            return error.message
         }
     }
 
@@ -108,43 +103,26 @@ internal object SafUtils {
         level: CompressionLevel,
         threads: CorkThreads,
     ): String? {
-        val resolver = libraryContext.contentResolver
-        val output = resolver.openFileDescriptor(outputUri, "rwt")
-            ?: throw IOException("Unable to open SAF archive output: $outputUri")
-        return try {
-            compressTree(treeUri, output, format, level, threads)
-        } catch (error: Throwable) {
-            output.close()
-            throw error
-        }
-    }
-
-    @RequiresApi(Build.VERSION_CODES.N)
-    internal fun compressTree(
-        treeUri: Uri,
-        output: ParcelFileDescriptor,
-        format: ContainerFormat,
-        level: CompressionLevel,
-        threads: CorkThreads,
-    ): String? {
+        /*require(!DocumentsContract.isTreeUri(outputUri)) {
+            "Archive output must be a document URI, not a tree URI."
+        }*/
         /*require(DocumentsContract.isTreeUri(treeUri)) {
             "compressTree requires an ACTION_OPEN_DOCUMENT_TREE URI."
         }*/
         require(format == ContainerFormat.Zip || format == ContainerFormat.SevenZ) {
             "SAF tree input supports ZIP and 7z containers; standalone LZMA accepts one file only."
         }
-
         val resolver = libraryContext.contentResolver
+        val output = resolver.openFileDescriptor(outputUri, "rwt")
+            ?: return "Unable to open SAF archive output: $outputUri"
 
-        val source = SafTreeInput(resolver, treeUri)
-        val outputFd = try {
-            output.detachFd()
-        } catch (error: Throwable) {
-            source.close()
-            throw error
-        }
+        var outputFd: Int = -1
+        lateinit var source: SafTreeInput
 
         return try {
+            source = SafTreeInput(resolver, treeUri, excludedOutputUri = outputUri)
+            outputFd = output.detachFd()
+            output.close()
             CorkNative.compressTreeToFd(
                 outputFd = outputFd,
                 format = format.id,
@@ -152,6 +130,13 @@ internal object SafUtils {
                 threads = threads.nativeValue,
                 source = source,
             )
+        } catch (error: Throwable) {
+            source.close()
+            try { output.close() } catch (_: Throwable) {}
+            if (outputFd >= 0) {
+                try { ParcelFileDescriptor.adoptFd(outputFd).close() } catch (_: Throwable) {}
+            }
+            error.message
         } finally {
             source.close()
         }
@@ -163,37 +148,35 @@ internal object SafUtils {
         outputTreeUri: Uri,
         threads: CorkThreads,
     ): String? {
+        /*require(DocumentsContract.isTreeUri(outputTreeUri)) {
+            "Decompression SAF output requires an ACTION_OPEN_DOCUMENT_TREE URI."
+        }*/
         /*require(!DocumentsContract.isTreeUri(archiveUri)) {
             "Archive input must be a document URI, not a tree URI."
         }*/
 
-        val archive = libraryContext.contentResolver.openFileDescriptor(archiveUri, "r")
-            ?: throw IOException("Unable to open SAF archive input: $archiveUri")
+        val resolver = libraryContext.contentResolver
+
+        val archive = resolver.openFileDescriptor(archiveUri, "r")
+            ?: return "Unable to open SAF archive input: $archiveUri"
+
+        var archiveFd: Int = -1
         return try {
-            decompressToTree(archive, outputTreeUri, threads)
-        } catch (error: Throwable) {
+            val sink = SafTreeOutput(resolver, outputTreeUri)
+            archiveFd = archive.detachFd()
             archive.close()
-            throw error
-        }
-    }
-
-    @RequiresApi(Build.VERSION_CODES.N)
-    internal fun decompressToTree(
-        archive: ParcelFileDescriptor,
-        outputTreeUri: Uri,
-        threads: CorkThreads,
-    ): String? {
-        /*require(DocumentsContract.isTreeUri(outputTreeUri)) {
-            "Decompression SAF output requires an ACTION_OPEN_DOCUMENT_TREE URI."
-        }*/
-        val sink = SafTreeOutput(libraryContext.contentResolver, outputTreeUri)
-        val archiveFd = archive.detachFd()
-
-        return CorkNative.decompressToTree(
+            CorkNative.decompressToTree(
                 archiveFd = archiveFd,
                 threads = threads.nativeValue,
                 sink = sink,
             )
+        } catch (error: Throwable) {
+            try { archive.close() } catch (_: Throwable) {}
+            if (archiveFd >= 0) {
+                try { ParcelFileDescriptor.adoptFd(archiveFd).close() } catch (_: Throwable) {}
+            }
+            return error.message
+        }
     }
 
     private fun archiveOutputMode(format: ContainerFormat): String = when (format) {
@@ -217,6 +200,7 @@ internal object SafUtils {
                 ':' -> if (firstComponent) {
                     throw IllegalArgumentException("Unsafe archive entry path: $path")
                 }
+
                 '\\' -> needsSlashNormalization = true
                 '/' -> {
                     validatePathComponent(path, componentStart, index, firstComponent)
@@ -274,7 +258,13 @@ internal object SafUtils {
     internal class SafTreeInput(
         private val resolver: ContentResolver,
         treeUri: Uri,
+        excludedOutputUri: Uri?
     ) {
+        private val excludedOutputAuthority = excludedOutputUri?.authority
+        private val excludedOutputDocumentId = excludedOutputUri?.let {
+            DocumentsContract.getDocumentId(it)
+        }
+
         private data class DirectoryFrame(
             val parentPath: String,
             val cursor: Cursor,
@@ -307,6 +297,14 @@ internal object SafUtils {
                 }
 
                 val childId = frame.cursor.getString(frame.idIndex)
+                if (
+                    childId == excludedOutputDocumentId &&
+                    rootUri.authority == excludedOutputAuthority
+                ) {
+                    // The output archive may be inside the selected input tree.
+                    // Never enumerate the document Cork is currently writing to.
+                    continue
+                }
                 val displayName = frame.cursor.getString(frame.nameIndex)
                 val directory = frame.cursor.getString(frame.mimeIndex) == MIME_DIRECTORY
                 val childPath = if (frame.parentPath.isEmpty()) {
@@ -502,9 +500,12 @@ internal object SafUtils {
                 null,
                 null,
             )?.use { cursor ->
-                val idIndex = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
-                val nameIndex = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
-                val mimeIndex = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
+                val idIndex =
+                    cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                val nameIndex =
+                    cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                val mimeIndex =
+                    cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
 
                 while (cursor.moveToNext()) {
                     val id = cursor.getString(idIndex)
