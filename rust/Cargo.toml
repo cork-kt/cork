@@ -13,7 +13,7 @@ crate-type = ["cdylib"]
 jni = "0.21.1"
 lzma-rust2 = { version = "0.21.0", features = ["encoder", "optimization"] }
 sevenz-rust2 = { version = "0.23.0", default-features = true }
-zip = { version = "8.6.0", default-features = true }
+zip = { version = "9.0.0", default-features = true }
 libc = "0.2"
 
 [profile.release]
