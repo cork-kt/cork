@@ -22,6 +22,22 @@ jobs:
           java-version: '17'
           cache: 'gradle'
 
+      - name: Setup gradle caches
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-cork-${{ hashFiles(
+            '**/*.gradle.kts',
+            '**/gradle-wrapper.properties',
+            '**/gradle.properties',
+            '**/settings.gradle.kts',
+            '**/libs.versions.toml'
+            ) }}
+          restore-keys: |
+            ${{ runner.os }}-cork-
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -29,6 +45,9 @@ jobs:
             aarch64-linux-android
             armv7-linux-androideabi
             x86_64-linux-android
+
+      - name: Setup rust caches
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - name: Build
         run: cargo install cargo-ndk && chmod +x gradlew && ./gradlew :cork:assembleRelease
