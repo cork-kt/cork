@@ -1,13 +1,15 @@
-name: Publish
+name: Build
 
 on:
   workflow_dispatch:
-  release:
-    types: [published]
+  push:
+    branches:
+      - master
+  pull_request:
 
 jobs:
   publish:
-    name: Publish
+    name: Build
     runs-on: ubuntu-latest
 
     steps:
@@ -28,11 +30,12 @@ jobs:
             armv7-linux-androideabi
             x86_64-linux-android
 
-      - name: Publish to Maven
-        env:
-          MAVEN_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
-          MAVEN_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
-          SIGNING_KEY_ID: ${{ secrets.SIGNING_KEY_ID }}
-          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
-          SIGNING_SECRET_KEY: ${{ secrets.GPG_KEY_CONTENTS }}
-        run: cargo install cargo-ndk && chmod +x gradlew && ./gradlew publishAllPublicationsToCentralPortal
+      - name: Build
+        run: cargo install cargo-ndk && chmod +x gradlew && ./gradlew :cork:assembleRelease
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cork
+          path: |
+            ./cork/build/outputs/aar/cork-release.aar
