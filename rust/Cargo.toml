@@ -10,7 +10,7 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-jni = "0.21.1"
+jni = "0.22.0"
 lzma-rust2 = { version = "0.21.0", features = ["encoder", "optimization"] }
 sevenz-rust2 = { version = "0.23.0", default-features = true }
 zip = { version = "8.6.0", default-features = true }
