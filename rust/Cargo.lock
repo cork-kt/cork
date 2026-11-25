@@ -130,7 +130,7 @@ version = "1.0.0-alpha1"
 dependencies = [
  "jni",
  "libc",
- "lzma-rust2 0.22.0",
+ "lzma-rust2 0.26.0",
  "sevenz-rust2",
  "zip",
 ]
@@ -401,6 +401,12 @@ name = "lzma-rust2"
 version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7277c9742229dc25243236d578b6471a798c554512c6f6a04365ec2e87c2a3bb"
+
+[[package]]
+name = "lzma-rust2"
+version = "0.26.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c7861572250348d13073a9035c6a83f3e583ec9a76a65ce92f338fe1107d8f5"
 dependencies = [
  "sha2",
 ]
